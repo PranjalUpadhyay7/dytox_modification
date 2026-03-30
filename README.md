@@ -71,7 +71,7 @@ flowchart TD
 
 ---
 
-## Architecural Extension: Task-Aware SAB Encoder
+## Architectural Extension: Task-Aware SAB Encoder
 
 ### Hypothesis
 
@@ -79,13 +79,13 @@ The original DyTox encoder is completely blind to task identity. My hypothesis: 
 
 ### Implementation
 
-Each SAB receives $T_{i, 	ext{ready}} = 	ext{Dropout}(T_i)$ and generates additive offsets to $Q, K, V$:
+Each SAB receives $T_{i, \text{ready}} = \text{Dropout}(T_i)$ and generates additive offsets to $Q, K, V$:
 
 $$
-\Delta_{QKV} = 	ext{MLP}(T_{i, 	ext{ready}})
+\Delta_{QKV} = \text{MLP}(T_{i, \text{ready}})
 $$
 $$
-QKV_{	ext{modulated}} = X \cdot W_{	ext{base}} + \Delta_{QKV}
+QKV_{\text{modulated}} = X \cdot W_{\text{base}} + \Delta_{QKV}
 $$
 
 ### Modified Architecture Config Data Flow
