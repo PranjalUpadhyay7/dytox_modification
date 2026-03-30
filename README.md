@@ -1,145 +1,142 @@
 <div align="center">
 
-# DyTox
+# DyTox Modification
 
-## Transformers for Continual Learning with DYnamic TOken eXpansion
+Dynamic Token Expansion for Continual Learning — refactored and extended for industrial experimentation.
 
-[![Paper](https://img.shields.io/badge/arXiv-2004.13513-brightgreen)](https://arxiv.org/abs/2111.11326)
-![CVPR](https://img.shields.io/badge/CVPR-2022-blue)
-[![Youtube](https://img.shields.io/badge/Youtube-link-red)](https://www.youtube.com/watch?v=O1GNm4WdrNw)
+[arXiv:2111.11326](https://arxiv.org/abs/2111.11326) · CVPR 2022
 
-![DyTox main figure](images/dytox.png)
-
-Welcome to DyTox, the first transformer designed explicitly for Continual Learning!
 </div>
 
+## Overview
+- Original DyTox: ViT/ConViT backbone with task-specific tokens (TAB) that expand per task, rehearsal + distillation to control forgetting.
+- This fork: production-grade `adl` package, adds a ResNet18 feature-extractor path, optional joint token routing, divergence head controls, Sharpness-Aware Minimization (SAM/Look-SAM), and broader backbone registry (ResNet/ResNeXt/SENet/VGG/Inception/SCS variants) alongside ViT/ConViT.
+- Goal: improve stability/speed on continual CIFAR/ImageNet by combining CNN inductive bias, token routing variants, diversity pressure, and sharpness-aware optimization.
 
-Work led by [Arthur Douillard](https://arthurdouillard.com/) and co-authored with [Alexandre Ramé](https://alexrame.github.io/),
-[Guillaume Couairon](https://phazcode.gitlab.io/about/), and [Matthieu Cord](http://webia.lip6.fr/~cord/).
+## Architecture (mermaid)
+```mermaid
+flowchart LR
+    subgraph Backbone
+        A[Input Image]
+        B[Patch/Conv Stem]
+        C[Feature Tokens]
+    end
+    subgraph TokenRouting
+        T1[Task Tokens (per task)]
+        JT[Joint Tokens (optional)]
+        CA[Class/Joint Attention Blocks]
+    end
+    subgraph Heads
+        H1[Main Classifier]
+        H2[Divergence Head (optional)]
+    end
+    subgraph Losses
+        L1[CE / Label Smoothing / Soft BCE]
+        L2[KD to Teacher]
+        L3[POD Feature Distillation]
+        L4[SAM / Look-SAM Optimization]
+    end
+    subgraph Memory
+        M1[Rehearsal Buffer]
+        M2[Herding & Replay Sampling]
+    end
 
-See our erratum [here](erratum_distributed.md).
-
-# Installation
-
-You first need to have a working python installation with version >= 3.6.
-
-Then create a conda env, and install the libraries in the `requirements.txt`: it
-includes pytorch and torchvision for the building blocks of our model. It also
-includes continuum for data loader made for continual learning, and `timm`.
-
-Note that this code is heavily based on the great codebase of [DeiT](https://github.com/facebookresearch/deit).
-
-# Launching an experiment
-
-CIFAR100 dataset will be auto-downloaded, however you must download yourself
-ImageNet.
-
-Each command needs three options files:
-- which dataset you want to run on and in which settings (i.e. how many steps)
-- Which class ordering, by default it'll be 0->C-1, but we used the class ordering
-  proposed by DER (and which all baselines also follow)
-- Which model version you want (DyTox, DyTox+, and DyTox++ (see supplementary
-  about that last one))
-
-To launch DyTox on CIFAR100 in the 50 steps setting on the GPUs #0 and #1:
-
-```bash
-bash train.sh 0,1 \
-    --options options/data/cifar100_2-2.yaml options/data/cifar100_order1.yaml options/model/cifar_dytox.yaml \
-    --name dytox \
-    --data-path MY_PATH_TO_DATASET \
-    --output-basedir PATH_TO_SAVE_CHECKPOINTS \
-    --memory-size 1000
+    A --> B --> C --> CA
+    T1 --> CA
+    JT -. joint_tokens .-> CA
+    CA --> H1
+    CA --> H2
+    H1 --> L1
+    H2 --> L1
+    C --> L3
+    L2 --> L1
+    M1 <---> M2
+    M2 --> L1
+    L4 -. updates .-> CA
+    L4 -. updates .-> H1
+    L4 -. updates .-> H2
 ```
 
-Folders will be auto-created with the results at
-`logs/cifar/2-2/{DATE}/{DATE}/{DATE}-dytox`.
+## What Changed (MODIFIED FROM ORIGINAL)
+- DyTox backbone swap: `resnet=True` path uses ResNet18 + 1×1 projection to embed dim (see [src/adl/models/dytox.py](src/adl/models/dytox.py)).
+- Joint token routing: `joint_tokens` processes all task tokens together for faster passes (masked attention).
+- Divergence head: `head_div` with `head_div_mode` (train/finetune) to diversify logits for new classes.
+- Backbone registry expansion: SCS ResNet variants (`resnet18_scs`, `resnet18_scs_avg`, `resnet18_scs_max`), SENet/VGG/Inception/ResNeXt exposed in [src/adl/models/factory.py](src/adl/models/factory.py) and [src/adl/models/backbones/cnn](src/adl/models/backbones/cnn).
+- SAM / Look-SAM: memory-aware first/second steps and look-ahead cadence in [src/adl/training/engine.py](src/adl/training/engine.py) and [src/adl/training/sam.py](src/adl/training/sam.py).
+- Packaging: refactored into `adl` package with config-driven runs and preserved upstream docs.
 
-Likewise, to launch DyTox+ and DyTox++, simply change the options. It's also the
-same for datasets. Note that we provided 3 different class orders (from DER's
-implem) for CIFAR100, and we average the results in our paper.
+## Original Components (ORIGINAL DYTOX CODE)
+- Task-token TAB blocks (ClassAttention/JointCA) in [src/adl/models/backbones/convit.py](src/adl/models/backbones/convit.py).
+- POD feature distillation in [src/adl/training/pod.py](src/adl/training/pod.py).
+- KD, rehearsal memory, finetuning hooks in [src/adl/training/rehearsal.py](src/adl/training/rehearsal.py) and loss wrappers in [src/adl/training/losses.py](src/adl/training/losses.py).
+- Continuum-based datasets and loaders in [src/adl/datasets/datasets.py](src/adl/datasets/datasets.py).
 
-When you have a doubt about the options to use, just check what was defined in the
-yaml option files in the folder `./options`.
+## Tech Stack
+- PyTorch (torch>=2.9.0), torchvision>=0.24.0
+- timm==0.4.12, continuum==1.0.27, pyyaml>=6.0.3
+- Distributed training, AMP, SAM/Look-SAM supported.
 
-# Resuming an experiment
+## Project Structure
+- [src/adl/cli.py](src/adl/cli.py) — entrypoint, args, task loop, logging.
+- [src/adl/models/dytox.py](src/adl/models/dytox.py) — DyTox module, resnet path, divergence head.
+- [src/adl/models/classifier.py](src/adl/models/classifier.py) — classifiers and head expansion.
+- [src/adl/models/factory.py](src/adl/models/factory.py) — backbone registry, loaders, DyTox updater.
+- [src/adl/models/backbones/](src/adl/models/backbones/) — ViT/ConViT, CNNs (ResNet/SCS/ResNeXt/SENet/VGG/Inception/Rebuffi), weight init.
+- [src/adl/training/](src/adl/training/) — engine, losses, mixup, POD, rehearsal, SAM/Look-SAM, samplers, scaler.
+- [src/adl/datasets/datasets.py](src/adl/datasets/datasets.py) — CIFAR100, ImageNet100/1000 loaders, transforms, class orders.
+- [src/adl/utils/](src/adl/utils/) — logging, distributed helpers, freezing, metrics.
+- Configs: [src/adl/configs/model](src/adl/configs/model) (DyTox/DyTox+/DyTox++), [src/adl/configs/data](src/adl/configs/data) (class orders and increments), [src/adl/configs/arthur.yaml](src/adl/configs/arthur.yaml) (machine paths).
+- Scripts: [src/adl/scripts/train.sh](src/adl/scripts/train.sh) (distributed launch), [src/adl/scripts/convert_memory.py](src/adl/scripts/convert_memory.py) (memory path rewrite).
+- Checkpoints: [src/adl/data/checkpoints/25-10-21_CIFAR-2-2_dytox_singleGPU_1](src/adl/data/checkpoints/25-10-21_CIFAR-2-2_dytox_singleGPU_1) (copied from logs_singleGPU).
+- Upstream docs preserved: [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md), [docs/UPSTREAM_LICENSE](docs/UPSTREAM_LICENSE).
 
-Some exp can be slow and you may need to resume it, like for ImageNet1000.
-
-First locate the checkpoints folder (by default at `./checkpoints/` if you didn't
-specify any `output-basedir`) where your experiment first ran. Then run the
-following command (I'm taking ImageNet1000 as an example but you could have
-taken any models and datasets):
-
+## Setup
 ```bash
-bash train.sh 0,1 \
-    --options options/data/imagenet1000_100-100.yaml options/data/imagenet1000_order1.yaml options/model/imagenet_dytox.yaml \
-    --name dytox \
-    --data-path MY_PATH_TO_DATASET \
-    --resume MY_PATH_TO_CKPT_FOLDER_OF_EXP \
-    --start-task TASK_ID_STARTING_FROM_0_OF_WHEN_THE_EXP_HAD_STOPPED \
-    --memory-size 20000
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 ```
 
-# Results
+## Training Examples
+- ConViT DyTox, CIFAR100 2-2:
+```bash
+python -m adl.cli \
+  --options src/adl/configs/model/cifar_dytox.yaml src/adl/configs/data/cifar100_2-2.yaml \
+  --data-path /path/to/cifar \
+  --dytox --model convit --input-size 32 --epochs 500 --batch-size 128 \
+  --head-div 0.1 --joint-tokens \
+  --sam-rho 0.05 --sam-first main --sam-second main
+```
 
-## ImageNet
+- ResNet18 DyTox path:
+```bash
+python -m adl.cli \
+  --options src/adl/configs/model/cifar_dytox.yaml src/adl/configs/data/cifar100_2-2.yaml \
+  --data-path /path/to/cifar \
+  --dytox --model resnet18 --resnet --input-size 32 \
+  --head-div 0.1 --joint-tokens
+```
 
-![ImageNet figure results](images/imagenet1000.png)
-![ImageNet table results](images/imagenet_table.png)
+- Distributed wrapper:
+```bash
+bash src/adl/scripts/train.sh 0,1,2,3 --options ...
+```
 
-## CIFAR100
+## Evaluation
+```bash
+python -m adl.cli --eval --resume /path/to/checkpoint.pth --options <model_yaml> <data_yaml>
+```
 
-![CIFAR figure results](images/cifar.png)
-![CIFAR table results](images/cifar_table.png)
+## Results & Logs
+- Available run: CIFAR100 2-2, metrics/logs in logs_singleGPU/25-10-21_CIFAR-2-2_dytox_singleGPU_1 and mirrored checkpoints in [src/adl/data/checkpoints/25-10-21_CIFAR-2-2_dytox_singleGPU_1](src/adl/data/checkpoints/25-10-21_CIFAR-2-2_dytox_singleGPU_1). Example from logs: avg_acc ≈62% after 50 increments, forgetting ≈19 (top-5 ≈88–90%).
+- No side-by-side baseline vs modified table yet; add future experiment sheets for comparison.
 
-# Frequenly Asked Questions
+## Future Work
+- Ablate joint_tokens and divergence head modes; benchmark ResNet/SCS vs ConViT on CIFAR 2-2/5-5/10-10 and ImageNet100 incremental.
+- Tune SAM/Look-SAM schedules per task; profile speed/accuracy tradeoffs of joint token routing.
+- Add experiment registry and automated result tables; unit tests for backbone registry and DyTox updates.
 
-> Is DyTox pretrained?
-
-- No! It's trained from scratch for fair comparison with previous SotAs
-
-> Your encoder is made actually of ConVit blocks, can I use something else? Like a MHSA or Swin?
-
-- Yes! I've used ConVit blocks because they trained well from scratch on small datasets like CIFAR
-
-> Can I add a new datasets?
-
-- Yes! You can add any datasets in [continual/datasets.py](https://github.com/arthurdouillard/dytox/blob/main/continual/datasets.py). They just need to be compatible with the [Continuum](https://github.com/Continvvm/continuum) library. But check it out, they have a lot of [implemented datasets](https://continuum.readthedocs.io/en/latest/tutorials/datasets/dataset.html)
-
-> Could I use a convolution-based backbone for the encoder instead of transformer blocks?
-
-- Yes! You'd need to modify the [DyTox module](https://github.com/arthurdouillard/dytox/blob/main/continual/dytox.py). I already provide several [CNNs](https://github.com/arthurdouillard/dytox/tree/main/continual/cnn). Note that for best results, you may want to remove the ultimate block of the CNN and add strides so that the spatial features are big enough at the end to make enough "tokens"
-
-> Do I need to install nvidia's apex for the mix precision?
-
-- No! DyTox uses Pytorch native mix precision
-
-> Can I run DyTox on a single GPU instead of two?
-
-- In theory, yes. Although the performance is a [bit lower](https://github.com/arthurdouillard/dytox/issues/2). I'll try to find the root cause of this. But on two GPUs the results are perfectly reproducible.
-
-> What is this finetuning phase?
-
-- New classes data is downsampled to the same amount of old classes data stored in the rehearsal memory. And the encoder is frozen. You can see which modules are frozen in which task in the [options files](https://github.com/arthurdouillard/dytox/blob/main/options/model/cifar_dytox.yaml#L35-L36).
-
-> Memory setting?
-
-- If you use distributed memory (default), use 20/N images per class with N the number of used GPUs. Thus for 2 GPUs, it's `--memory-size 1000` for CIFAR100 and ImageNet100 and `--memory-size 10000` for Imagenet1000. If you use global memory (`--global-memory`), use 20 images per class.
-
-> Distributed memory?
-
-- See [here](erratum_distributed.md).
-
-> Results obtained on >=2 GPUs are slightly different from the first version of the paper?
-
-- See [here](erratum_distributed.md).
-
-
-
-# Citation
-
-If you compare to this model or use this code for any means, please cite us! Thanks :)
+## Citation
+If you use this code, cite the original paper:
 
 ```
 @inproceedings{douillard2021dytox,
