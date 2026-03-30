@@ -1,7 +1,27 @@
-*.swp
+# Python-generated files
+__pycache__/
 **/__pycache__/**
-checkpoints/
-logs/
+*.py[oc]
+*.swp
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Editor and notebook artifacts
 .vscode
 .ipynb_checkpoints
 
+# Datasets and artifacts
+/data/
+/logs/
+/logs_singleGPU/
+/checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.npz
+*.log

@@ -1,0 +1,23 @@
+[project]
+name = "adl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Pranjal Upadhyay", email = "pranjalupadhyay537@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "continuum==1.0.27",
+    "pyyaml>=6.0.3",
+    "timm==0.4.12",
+    "torch>=2.9.0",
+    "torchvision>=0.24.0",
+]
+
+[project.scripts]
+adl = "adl.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
