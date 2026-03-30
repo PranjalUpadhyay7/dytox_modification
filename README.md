@@ -41,15 +41,15 @@ In the baseline DyTox network, the encoder is heavily shared and entirely task-a
 flowchart TD
     IMG["🖼 Input Image"] --> PATCH["Patch Tokenizer\nN patches → D-dim\n+ positional embeddings\n+ class token x_cls"]
 
-    PATCH --> SAB["Shared Encoder\nSelf-Attention Blocks SABs\nx_l+1 = x_l + SA_l Norm x_l\nSame generic features for ALL tasks"]
+    PATCH --> SAB["Shared Encoder\nSelf-Attention Blocks SABs\nx_{l+1} = x_l + SA_l(Norm(x_l))\nSame generic features for ALL tasks"]
 
-    SAB --> TAB1["TAB — Task 1\nθ₁ queries x_L\ne₁ = Softmax Q·Kᵀ/√d · V"]
-    SAB --> TAB2["TAB — Task 2\nθ₂ queries x_L\ne₂ = Softmax Q·Kᵀ/√d · V"]
-    SAB --> TABN["TAB — Task T\nθ_T queries x_L\ne_T = Softmax Q·Kᵀ/√d · V"]
+    SAB --> TAB1["TAB — Task 1\nθ₁ queries x_L\ne₁ = Softmax(Q·Kᵀ/√d) · V"]
+    SAB --> TAB2["TAB — Task 2\nθ₂ queries x_L\ne₂ = Softmax(Q·Kᵀ/√d) · V"]
+    SAB --> TABN["TAB — Task T\nθ_T queries x_L\ne_T = Softmax(Q·Kᵀ/√d) · V"]
 
-    TAB1 --> CLF1["Clf₁\nŷ₁ = σ W₁·e₁"]
-    TAB2 --> CLF2["Clf₂\nŷ₂ = σ W₂·e₂"]
-    TABN --> CLFN["Clf_T\nŷ_T = σ W_T·e_T"]
+    TAB1 --> CLF1["Clf₁\nŷ₁ = σ(W₁·e₁)"]
+    TAB2 --> CLF2["Clf₂\nŷ₂ = σ(W₂·e₂)"]
+    TABN --> CLFN["Clf_T\nŷ_T = σ(W_T·e_T)"]
 
     CLF1 --> OUT["Final prediction ŷ₁:T\nconcatenated logits"]
     CLF2 --> OUT
@@ -79,12 +79,14 @@ The original DyTox encoder is completely blind to task identity. My hypothesis: 
 
 ### Implementation
 
-Each SAB receives `T_i,ready = Dropout(T_i)` and generates additive offsets to Q, K, V:
+Each SAB receives $T_{i, 	ext{ready}} = 	ext{Dropout}(T_i)$ and generates additive offsets to $Q, K, V$:
 
-```
-Δ_QKV         = MLP(T_i,ready)
-QKV_modulated = X · W_base + Δ_QKV
-```
+$$
+\Delta_{QKV} = 	ext{MLP}(T_{i, 	ext{ready}})
+$$
+$$
+QKV_{	ext{modulated}} = X \cdot W_{	ext{base}} + \Delta_{QKV}
+$$
 
 ### Modified Architecture Config Data Flow
 
@@ -92,20 +94,20 @@ QKV_modulated = X · W_base + Δ_QKV
 flowchart TD
     IMG["🖼 Input Image"] --> PATCH["Patch Tokenizer\nN patches → D-dim\n+ positional embeddings p\nx_in = x_cls, x_0 + p"]
 
-    TT["Task Token θ_i\nT_i,ready = Dropout θ_i"] --> MLP_OFFSET
+    TT["Task Token θ_i\nT_{i,ready} = Dropout(θ_i)"] --> MLP_OFFSET
 
     PATCH --> SAB_MOD
 
     subgraph SAB_MOD["Task-Aware SABs — MODIFIED ★"]
-        MLP_OFFSET["MLP T_i,ready\n→ Δ_QKV offsets"]
+        MLP_OFFSET["MLP(T_{i,ready})\n→ Δ_QKV offsets"]
         PROJ["QKV = X·W_base + Δ_QKV\nTask-specialized from layer 1"]
-        SA["Self-Attention with modulated QKV\nx_l+1 = x_l + SA_l QKV"]
+        SA["Self-Attention with modulated QKV\nx_{l+1} = x_l + SA_l(QKV)"]
         MLP_OFFSET --> PROJ --> SA
     end
 
-    SAB_MOD --> TAB["Task-Attention Block TAB\nQ from θ_i only\nK, V from all tokens\ne_i = Softmax Q·Kᵀ/√d · V"]
+    SAB_MOD --> TAB["Task-Attention Block TAB\nQ from θ_i only\nK, V from all tokens\ne_i = Softmax(Q·Kᵀ/√d) · V"]
 
-    TAB --> CLF["Per-task Classifier\nŷ_i = σ W_i · Norm_i · e_i + b_i"]
+    TAB --> CLF["Per-task Classifier\nŷ_i = σ(W_i · Norm_i(e_i) + b_i)"]
 
     style SAB_MOD fill:#1a3a5c,color:#fff,stroke:#1a3a5c
     style TT fill:#534AB7,color:#fff,stroke:#534AB7
