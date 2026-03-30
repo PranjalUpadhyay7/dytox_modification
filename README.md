@@ -173,7 +173,7 @@ quadrantChart
     quadrant-3 Fails Both
     quadrant-4 Forgets Fast
     DyTox Baseline: [0.65, 0.55]
-    Task-Aware SAB (Ours): [0.45, 0.75]
+    Task-Aware SAB Ours: [0.45, 0.75]
     EWC Static: [0.25, 0.60]
     DER Dynamic: [0.80, 0.30]
 ```
