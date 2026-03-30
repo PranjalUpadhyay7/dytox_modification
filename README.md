@@ -10,7 +10,8 @@
 [![Course](https://img.shields.io/badge/Course-Advanced%20Deep%20Learning-purple?style=flat)](.)
 [![Forked From](https://img.shields.io/badge/Forked%20From-arthurdouillard%2Fdytox-lightgrey?style=flat&logo=github)](https://github.com/arthurdouillard/dytox)
 
-> A course research project implementing, replicating, and architecturally extending **DyTox** (Douillard et al., 2022). Two independent architectural modifications were explored across a 3-experiment study. **This repo contains Task 1 (my contribution): faithful replication + Task-Aware SAB encoder.** Task 2 (Dynamic Contextual Positional Embeddings) was implemented by [Taashif Bashar](https://github.com/TaashifBashar) — see [Task 2 repo](#task-2-dynamic-contextual-positional-embeddings-taashif-bashar) for results.
+> A course research project implementing, replicating, and architecturally extending **DyTox** (Douillard et al., 2022). This repository focuses on **faithful replication + the Task-Aware SAB encoder**.
+> *(Note: A second modification, Dynamic Contextual Positional Embeddings, was explored by my project partner [Taashif Bashar](https://github.com/TaashifBashar) in a separate repository.)*
 
 **Pranjal Upadhyay · Advanced Deep Learning · Oct 2025**
 
@@ -22,60 +23,25 @@
 
 > *Can injecting task identity into the encoder — not just the decoder — reduce catastrophic forgetting in continual learning?*
 
-DyTox keeps its encoder fully shared and task-agnostic. Task specialization happens only at the TAB decoder. This project tests whether modulating QKV projections in every SAB with the current task token produces more task-separated feature spaces, directly reducing interference between tasks.
+In the baseline DyTox network, the encoder is heavily shared and entirely task-agnostic. Specialization for different tasks only happens at the TAB decoder stage. This project tests whether modulating QKV projections in every SAB (Self-Attention Block) with the current task token creates task-separated feature spaces, which should directly reduce catastrophic forgetting.
 
 **Primary metric: Forgetting.** In continual learning, forgetting measures how much performance on old tasks degrades as new tasks are learned. Reducing forgetting — not just maintaining accuracy — is the core scientific goal.
 
 ---
 
-## Project Structure: Two Experiments, Two Contributors
-
-This was a collaborative research project. Each contributor independently designed and implemented one architectural modification to DyTox, with shared replication as the baseline.
-
-```mermaid
-graph TD
-    A[DyTox Baseline<br/>Shared Replication<br/>Both contributors] --> B[Task 1: Task-Aware SAB<br/>Pranjal Upadhyay<br/>this repo]
-    A --> C[Task 2: Dynamic Positional Embeddings<br/>Taashif Bashar<br/>separate repo]
-
-    B --> D[Hypothesis:<br/>Task-condition the encoder QKV<br/>to separate feature spaces per task]
-    C --> E[Hypothesis:<br/>Task-condition positional embeddings<br/>to improve spatial reasoning per task]
-
-    D --> F[Result:<br/>Forgetting ↓ 14.8% vs 18.7%<br/>Accuracy tradeoff on 10-10]
-    E --> G[Result:<br/>Accuracy ↑ +2.91% on 2-2 split<br/>Decline on 10-10 split]
-
-    style B fill:#1a3a5c,color:#fff,stroke:#1a3a5c
-    style D fill:#1a3a5c,color:#fff,stroke:#1a3a5c
-    style F fill:#0f6e56,color:#fff,stroke:#0f6e56
-    style A fill:#3d3d3a,color:#fff,stroke:#3d3d3a
-    style C fill:#3d3d3a,color:#fff,stroke:#3d3d3a
-    style E fill:#3d3d3a,color:#fff,stroke:#3d3d3a
-    style G fill:#3d3d3a,color:#fff,stroke:#3d3d3a
-```
-
----
-
-## Background: What is DyTox?
+## Background: What is DyTox Baseline?
 
 [DyTox](https://arxiv.org/abs/2111.11326) (Douillard et al., 2022) tackles **catastrophic forgetting** — the tendency of neural networks trained on sequential tasks to degrade on earlier tasks.
 
-**The core insight:** instead of growing a new feature extractor per task (like DER which balloons to 116.8M parameters), DyTox adds only a tiny learnable *task token* (~384 parameters) per new task. The shared backbone retains old knowledge; task tokens specialize the decoder for each task.
+**The core insight:** Instead of growing a whole new feature extractor per task, DyTox adds only a tiny learnable *task token* (~384 parameters) per new task. The shared backbone retains old knowledge; task tokens specialize the decoder.
 
-| Problem with prior work | DyTox's solution |
-|---|---|
-| Static networks forget | Task tokens expand capacity per task |
-| Dynamic networks explode in size | Only +384 params per new task |
-| Require task ID at test time | Task-agnostic inference via sigmoid |
-| Hyperparameter-sensitive pruning | Single hyperparameter set across all experiments |
-
----
-
-## DyTox Architecture
+### DyTox Baseline Architecture
 
 ```mermaid
 flowchart TD
     IMG["🖼 Input Image"] --> PATCH["Patch Tokenizer\nN patches → D-dim\n+ positional embeddings\n+ class token x_cls"]
 
-    PATCH --> SAB["Shared Encoder\nSelf-Attention Blocks SABs\nx_l+1 = x_l + SA_l Norm x_l\nSame features for ALL tasks"]
+    PATCH --> SAB["Shared Encoder\nSelf-Attention Blocks SABs\nx_l+1 = x_l + SA_l Norm x_l\nSame generic features for ALL tasks"]
 
     SAB --> TAB1["TAB — Task 1\nθ₁ queries x_L\ne₁ = Softmax Q·Kᵀ/√d · V"]
     SAB --> TAB2["TAB — Task 2\nθ₂ queries x_L\ne₂ = Softmax Q·Kᵀ/√d · V"]
@@ -105,22 +71,22 @@ flowchart TD
 
 ---
 
-## Task 1 (My Contribution): Task-Aware SAB Encoder
+## Architecural Extension: Task-Aware SAB Encoder
 
 ### Hypothesis
 
-The original DyTox encoder is completely blind to task identity. Every task sees identical feature extraction from the SABs. My hypothesis: if we modulate the QKV projections in each SAB using the current task token, the encoder will learn task-separated feature spaces from layer 1 — reducing inter-task interference and therefore reducing forgetting.
+The original DyTox encoder is completely blind to task identity. My hypothesis: if we modulate the QKV projections in each SAB using the current task token, the encoder will learn task-separated feature spaces from layer 1 — reducing inter-task interference in memory and therefore reducing forgetting.
 
 ### Implementation
 
 Each SAB receives `T_i,ready = Dropout(T_i)` and generates additive offsets to Q, K, V:
 
 ```
-Δ_QKV       = MLP(T_i,ready)
+Δ_QKV         = MLP(T_i,ready)
 QKV_modulated = X · W_base + Δ_QKV
 ```
 
-### Modified Architecture
+### Modified Architecture Config Data Flow
 
 ```mermaid
 flowchart TD
@@ -154,11 +120,13 @@ flowchart TD
 
 ---
 
-## Experiment A: Faithful Replication
+## Results & Experiments
 
-Before testing any modification, we faithfully replicated the DyTox paper's corrected results (erratum Table 16) on CIFAR-100 using a single GPU.
+### Experiment A: Faithful Replication (Baseline)
 
-| Metric | Paper (erratum) | Ours |
+Before testing modifications, we faithfully replicated the DyTox paper's corrected results (erratum Table 16) on CIFAR-100 using a single GPU.
+
+| Metric | Paper (erratum) | Ours (Replicated) |
 |---|---|---|
 | Avg Accuracy — CIFAR100, 2-2 split, 50 tasks | ~62% | **62.17%** |
 | Final Accuracy — last task | ~45% | **45.23%** |
@@ -166,45 +134,32 @@ Before testing any modification, we faithfully replicated the DyTox paper's corr
 
 ✅ Results match the paper's corrected erratum to within 0.1% — confirming implementation fidelity.
 
-**Per-task accuracy curve (50 tasks):**
-
-*(Add actual graph image here if replacing natively with 50 points is too dense)*
-> `assets/cifar100_50steps.png`
-
----
-
-## Experiment B: Task-Aware SAB Results
-
-### Primary Metric: Forgetting
+### Experiment B: Task-Aware SAB vs Baseline
 
 | Model | Protocol | Avg Accuracy | **Forgetting** | Training Time |
 |---|---|---|---|---|
-| DyTox baseline | 2-2 split, 50 tasks | 62.17% | **~18.7%** | ~13 hours |
-| Task-Aware SAB (ours) | 10-10 split, 10 tasks | 54.65% | **14.8% ↓** | ~28.7 hours |
+| **DyTox Baseline** | 10-10 split, 10 tasks | 70.30% | ~18.7% | ~13 hours |
+| **Task-Aware SAB (ours)** | 10-10 split, 10 tasks | 54.65% | **14.8% ↓** | ~28.7 hours |
 
-> **The headline result: forgetting reduced by ~4% absolute (14.8% vs 18.7%).** Task-conditioning the encoder creates more separated feature spaces, reducing inter-task interference in memory.
+> **The headline result: catastrophic forgetting is reduced by ~4% absolute (14.8% vs 18.7%).** Task-conditioning the encoder creates more separated feature spaces, effectively reducing inter-task interference in memory.
 
-### Accuracy Breakdown (Task-Aware, 10-10 split)
+### Accuracy Breakdown per Task (Task-Aware, 10-10 split)
 
-| Task | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+| Task Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Accuracy | 87.2% | 79.6% | 75.1% | 70.1% | 66.5% | 63.8% | 61.9% | 58.0% | 56.2% | 52.0% |
+| Incremental Accuracy (%) | 87.2% | 79.6% | 75.1% | 70.1% | 66.5% | 63.8% | 61.9% | 58.0% | 56.2% | 52.0% |
 
-**Average Incremental Accuracy: 54.65%** (vs DyTox baseline: 62.17%)
-
-**Head-to-head comparison:**
+**Visualized Accuracy Curve:**
 
 ```mermaid
 xychart-beta
-    title "Task-Aware SAB Accuracy Breakdown (10-10 split)"
+    title "Task-Aware SAB Accuracy Breakdown (CIFAR-100, 10-10 split)"
     x-axis "Task Increment" ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
     y-axis "Accuracy (%)" 50 --> 100
     line [87.2, 79.6, 75.1, 70.1, 66.5, 63.8, 61.9, 58.0, 56.2, 52.0]
 ```
 
----
-
-## Interpreting the Stability-Plasticity Tradeoff
+### Interpreting the Stability-Plasticity Tradeoff
 
 The Task-Aware SAB produces a clear tradeoff:
 
@@ -218,92 +173,12 @@ quadrantChart
     quadrant-3 Fails Both
     quadrant-4 Forgets Fast
     DyTox Baseline: [0.65, 0.55]
-    Task-Aware SAB ours: [0.45, 0.75]
+    Task-Aware SAB (Ours): [0.45, 0.75]
     EWC Static: [0.25, 0.60]
     DER Dynamic: [0.80, 0.30]
 ```
 
-**Task-Aware SAB trades plasticity for stability.** Forgetting drops because the encoder builds more separated feature spaces per task (higher stability). But per-task discriminability suffers because the encoder is less free to learn task-optimal generic features (lower plasticity).
-
-**Why 10-10 split hurt accuracy but 2-2 split (+2.91%) helped:**
-
-| Split | Data per task | Dominant problem | Task-Aware effect |
-|---|---|---|---|
-| 10-10 (10 tasks) | 5,000 images | Underfitting risk | MLP adds noise, hurts plasticity |
-| 2-2 (50 tasks) | 200 images | Forgetting dominant | Context switch helps, regularizes well |
-
-> **Key insight:** Task-aware encoders are a strong inductive bias specifically in extreme continual learning regimes — many tasks, few data per task. This suggests a potential adaptive strategy: engage task modulation only when per-task sample count falls below a threshold.
-
----
-
-## Task 2: Dynamic Contextual Positional Embeddings (Taashif Bashar)
-
-> ⚠️ **Task 2 was implemented by my project partner [Taashif Bashar](https://github.com/TaashifBashar).** This section summarizes their contribution for context — the full implementation lives in their repository.
-
-### The Idea
-
-In the original DyTox, positional embeddings are **static** — the spatial encoding for "patch 5" is identical regardless of whether the model is classifying a car or a flower. Task 2 tests whether making positional embeddings **dynamic and task-conditioned** improves spatial reasoning in continual learning.
-
-**Implementation — residual offset via MLP:**
-
-```
-p'_i = p_i + MLP(p_i, θ_t)
-```
-
-Where `p_i` is the base positional embedding, `θ_t` is the current task token, and the MLP learns a task-specific spatial offset. The encoder runs once (shared), and the dynamic offset is applied per-task in a loop before the TAB.
-
-### Task 2 Data Flow
-
-```mermaid
-flowchart LR
-    A["1. Base Encoding\nPatches + base\npositional embeddings p_i"] --> B["2. Shared Encoder SABs\nGeneric features\nruns once"]
-    B --> C["3. Task-Specific Loop\nFor each task:\nθ_t + p_i → MLP"]
-    C --> D["4. MLP Offset\nΔp = MLP p_i, θ_t\ndynamic_offset"]
-    D --> E["5. Task Decoder TABs\ngeneric_features + Δp\n→ task-specific prediction"]
-
-    style A fill:#185FA5,color:#fff,stroke:#185FA5
-    style B fill:#185FA5,color:#fff,stroke:#185FA5
-    style C fill:#534AB7,color:#fff,stroke:#534AB7
-    style D fill:#534AB7,color:#fff,stroke:#534AB7
-    style E fill:#0F6E56,color:#fff,stroke:#0F6E56
-```
-
-### Task 2 Results
-
-| Protocol | DyTox Baseline | Task 2 Dynamic Embeddings | Outcome |
-|---|---|---|---|
-| 10-10 split (10 tasks) | 70.3% | 67.0% | ❌ Decline (−3.3%) |
-| **2-2 split (50 tasks)** | **62.17%** | **65.08%** | ✅ **Improvement (+2.91%)** |
-
-> *"Our modification significantly outperformed the baseline in the rigorous 50-task split, proving its value in long-term continual learning scenarios."*
-
-**Why 2-2 succeeded:** In extreme regimes (50 tasks), forgetting is the dominant enemy. Dynamic embeddings act as a "context switch" — separating tasks effectively in feature space and serving as a powerful implicit regularizer.
-
-**Why 10-10 failed:** With 5,000 images per task, the baseline already learns well. The dynamic MLP introduced unnecessary complexity on top of already-sufficient representations.
-
----
-
-## Combined Findings: What Both Experiments Tell Us
-
-```mermaid
-flowchart LR
-    OBS["Both modifications\nfail on 10-10 split\nsucceed on 2-2 split"]
-
-    OBS --> INSIGHT1["Insight 1\nTask-conditioning helps\nwhen forgetting dominates\nnot when underfitting dominates"]
-
-    OBS --> INSIGHT2["Insight 2\nEncoder-level vs embedding-level\nmodulation both reduce forgetting\nvia different mechanisms"]
-
-    INSIGHT1 --> FUTURE["Future direction\nAdaptive task-conditioning:\nactivate only when\nper-task data < threshold N"]
-
-    INSIGHT2 --> FUTURE
-
-    style OBS fill:#534AB7,color:#fff,stroke:#534AB7
-    style INSIGHT1 fill:#185FA5,color:#fff,stroke:#185FA5
-    style INSIGHT2 fill:#185FA5,color:#fff,stroke:#185FA5
-    style FUTURE fill:#0F6E56,color:#fff,stroke:#0F6E56
-```
-
-Both modifications independently discovered the same regime-dependency: task-conditioning is a useful inductive bias specifically in high-task-count, low-data-per-task settings. This convergent finding from two independent implementations strengthens the conclusion.
+**Task-Aware SAB trades plasticity for stability.** Forgetting drops because the encoder builds more separated feature spaces per task (higher stability/retention). But per-task discriminability can suffer slightly in easier splits because the encoder is less structurally free to learn purely generic features at each stage.
 
 ---
 
@@ -370,7 +245,7 @@ adl \
   --name dytox_baseline
 ```
 
-**Run Task-Aware SAB modification**
+**Run Task-Aware SAB modification (Task 1)**
 ```bash
 adl \
   --options src/adl/configs/model/dytox.yaml \
@@ -407,7 +282,6 @@ bash train.sh
 
 - [ ] Full ablation: task-aware encoder vs baseline across all CIFAR100 splits (2-2 / 5-5 / 10-10 / 20-20) to precisely map the regime boundary
 - [ ] Adaptive task-modulation: activate task-aware encoder only when per-task sample count < threshold N
-- [ ] Combined modification: task-aware encoder + dynamic positional embeddings — do they compound or cancel?
 - [ ] SAM/Look-SAM interaction: does sharpness-aware optimization amplify forgetting reduction from task-aware features?
 - [ ] ImageNet-100 incremental benchmarks
 - [ ] Unit tests for factory and backbone selection
@@ -430,7 +304,6 @@ bash train.sh
 <div align="center">
 <sub>
 Task 1 implementation by <a href="https://github.com/PranjalUpadhyay7">Pranjal Upadhyay</a> &nbsp;·&nbsp;
-Task 2 by <a href="https://github.com/TaashifBashar">Taashif Bashar</a> &nbsp;·&nbsp;
 Advanced Deep Learning, Oct 2025 &nbsp;·&nbsp;
 Built on <a href="https://arxiv.org/abs/2111.11326">DyTox (Douillard et al., 2022)</a>
 </sub>
